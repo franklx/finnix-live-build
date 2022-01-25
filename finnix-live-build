@@ -238,7 +238,7 @@ do_lb_config() {
         --apt-http-proxy "${APT_HTTP_PROXY}" \
         --apt-indices false \
         --apt-recommends false \
-        --apt-source-archives true \
+        --apt-source-archives false \
         --architectures "${ARCH}" \
         --archive-areas "main contrib non-free" \
         --binary-images "${BINARY_IMAGES}" \
