@@ -17,3 +17,5 @@ alias la='ls -A'
 alias ll='ls -alF'
 
 alias httpd='python3 -m http.server'
+
+export PROMPT_COMMAND="ip -c -br addr"

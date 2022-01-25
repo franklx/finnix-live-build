@@ -6,6 +6,8 @@
 
 set -e
 
+VERSION="frk-$(date +%Y%m%d)"
+
 PRODUCT="${PRODUCT:-Finnix}"
 PRODUCT_ID="${PRODUCT_ID:-finnix}"
 VERSION="${VERSION:-dev}"
@@ -240,11 +242,11 @@ do_lb_config() {
         --architectures "${ARCH}" \
         --archive-areas "main contrib non-free" \
         --binary-images "${BINARY_IMAGES}" \
-        --bootappend-live "boot=live quiet" \
+        --bootappend-live 'boot=live quiet sshd passwd=finnix:linux' \
         --bootloaders "${BOOTLOADERS}" \
         --cache-indices true \
         --chroot-squashfs-compression-type "${SQUASHFS_COMP}" \
-        --distribution testing \
+        --distribution bullseye \
         --firmware-chroot false \
         --hdd-label "$(echo "${PRODUCT_ID}" | tr '[:lower:]' '[:upper:]')" \
         --image-name "${PRODUCT_ID}" \
@@ -257,6 +259,9 @@ do_lb_config() {
         --source-images iso \
         --zsync false \
         --mode debian \
+        --security true \
+        --updates true \
+        --backports true \
         "$@"
 }
 
