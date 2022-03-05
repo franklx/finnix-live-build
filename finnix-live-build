@@ -242,7 +242,7 @@ do_lb_config() {
         --architectures "${ARCH}" \
         --archive-areas "main contrib non-free" \
         --binary-images "${BINARY_IMAGES}" \
-        --bootappend-live 'boot=live quiet sshd passwd=finnix:linux' \
+        --bootappend-live 'boot=live quiet sshd passwd=root:finnix passwd=finnix:linux' \
         --bootloaders "${BOOTLOADERS}" \
         --cache-indices true \
         --chroot-squashfs-compression-type "${SQUASHFS_COMP}" \

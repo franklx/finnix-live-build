@@ -1,9 +1,43 @@
-__sh_exitcode() { ret=$?; if [[ $ret != 0 ]]; then echo "$ret "; fi }
+export COLORFGBG=";0"
+
+TTB='\[\e]2;'
+TTE='\007\]'
 
 if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
-    PS1='${debian_chroot:+($debian_chroot)}\[\033[1;31m\]$(__sh_exitcode)\[\033[1;37m\]\u\[\033[0;39m\]@\[\033[1;37m\]\l\[\033[0;39m\]:\[\033[1;37m\]\w\[\033[1;34m\]\$\[\033[0;39m\] '
+    DIV='\[\e[01;37m\]'
+    HST='\[\e[01;33m\]'
+    RES='\[\e[00m\]'
+    SEP='\[\e[01;37m\]'
+    PTH='\[\e[01;34m\]'
+    ADR='\[\e[01;36m\]'
+    alias ag='ag --color-path "1;36" --color-match "1;32" --color-line "1;37"'
+    alias man='man -P less'
+    alias ls='ls --hide=__pycache__ --color=auto'
+    alias ip='ip --color=auto'
+    alias grep='grep --color=auto'
+    alias fgrep='fgrep --color=auto'
+    alias egrep='egrep --color=auto'
+    alias v='vdir --color=auto'
 else
-    PS1='${debian_chroot:+($debian_chroot)}$(__sh_exitcode)\u@\h:\w\$ '
+    DIV=''
+    HST=''
+    RES=''
+    SEP=''
+    PTH=''
+    ADR=''
+    alias v='ls -l'
+    alias ls='ls --hide=__pycache__'
+    alias man='echo -e "Please use \"M-x manual-entry RET manpage\"\nto read the manual page for"'
+fi
+
+export PROMPT_COMMAND='HN=$(echo `hostname -I`)'
+
+if [[ ${EUID} == 0 ]] ; then
+    USR='\[\e[01;31m\]'
+    export PS1="${debian_chroot:+($debian_chroot)}${ADR}"'${HN:-!}'"${SEP}|${USR}\h${SEP}:${PTH}\w # ${TTB}"'${HN:-!}'"|\h${TTE}${RES}"
+else
+    USR='\[\e[01;32m\]'
+    export PS1="${debian_chroot:+($debian_chroot)}${ADR}"'${HN:-!}'"${SEP}|${HST}\u${SEP}@${USR}\h${SEP}:${PTH}\w # ${TTB}"'${HN:-!}'"|\u@\h${TTE}${RES}"
 fi
 
 export GPG_TTY="$(tty)"
@@ -18,4 +52,4 @@ alias ll='ls -alF'
 
 alias httpd='python3 -m http.server'
 
-export PROMPT_COMMAND="ip -c -br addr"
+# vim: ft=bash

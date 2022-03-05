@@ -4,6 +4,7 @@ acpi
 #endif
 apg
 apt-utils
+arch-install-scripts
 arj
 arp-scan
 arpalert
@@ -196,6 +197,7 @@ screen
 sdparm
 setserial
 sharutils
+silversearcher-ag
 sipcalc
 smartmontools
 smbclient
