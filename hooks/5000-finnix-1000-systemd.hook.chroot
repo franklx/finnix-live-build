@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# SPDX-PackageSummary: finnix-live-build
+# SPDX-FileComment: systemd chroot hook
+# SPDX-FileCopyrightText: Copyright (C) 2020-2022 Ryan Finnie
+# SPDX-License-Identifier: MPL-2.0
+
+set -e
+
+# Create any remaining systemd users/groups which would be created
+# at runtime.  (Just "systemd-coredump" as of this writing.)
+systemd-sysusers
+
+# systemd-gpt-auto-generator is unneeded on a live system, and produces
+# a warning on EFI systems.
+mkdir -p /usr/lib/systemd/diverted-generators
+dpkg-divert --add --rename --divert /usr/lib/systemd/diverted-generators/systemd-gpt-auto-generator /usr/lib/systemd/system-generators/systemd-gpt-auto-generator

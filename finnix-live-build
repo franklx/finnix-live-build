@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # SPDX-PackageSummary: finnix-live-build
-# SPDX-FileCopyrightText: Copyright (C) 2020-2021 Ryan Finnie
+# SPDX-FileCopyrightText: Copyright (C) 2020-2022 Ryan Finnie
 # SPDX-License-Identifier: MPL-2.0
 
 set -e
@@ -11,7 +11,7 @@ VERSION="frk-$(date +%Y%m%d)"
 PRODUCT="${PRODUCT:-Finnix}"
 PRODUCT_ID="${PRODUCT_ID:-finnix}"
 VERSION="${VERSION:-dev}"
-CODENAME="${CODENAME:-Sturgeon Bay}"
+CODENAME="${CODENAME:-Wisconsin Dells}"
 ARCH="${ARCH:-$(dpkg --print-architecture)}"
 SOURCE_ISO="${SOURCE_ISO:-false}"
 CACHE_FROZEN="${CACHE_FROZEN:-false}"
@@ -51,7 +51,17 @@ render() {
         "GIT_DESC=${GIT_DESC}" \
         "LIVE_BUILD_GIT_DESC=${LIVE_BUILD_GIT_DESC}" \
         "BUILD_TAGS=${BUILD_TAGS}" \
-   "${BASE_DIR}/tools/jinja2-render"
+    "${BASE_DIR}/tools/jinja2-render"
+}
+
+render_files() {
+    destdir="$1"; shift
+    mkdir -p "${destdir}"
+    for i in "$@"; do
+        basefn="$(basename "$i")"
+        rm -f "${destdir}/${basefn}"
+        render <"${i}" >"${destdir}/${basefn}"
+    done
 }
 
 # PACKAGES USED:
@@ -66,7 +76,6 @@ render() {
 # Optional: flake8 (${PYTHON} -mflake8): Lint, required for LINT=true
 # Optional: git (git): Build IDs
 # Optional: file (file): Post-build file info
-# Optional: debian-ports-archive-keyring: Required for riscv64 architecture
 
 host_commands="debootstrap ${PYTHON} rsvg-convert pandoc"
 missing_commands=""
@@ -131,6 +140,7 @@ if [ "${LINT}" = "true" ]; then
 fi
 
 BASE_DIR="${BASE_DIR:-$(dirname "$(readlink -f "$0")")}"
+FILES_DIR="${FILES_DIR:-${BASE_DIR}/files}"
 DATA_DIR="${DATA_DIR:-${BASE_DIR}/build}"
 CACHE_DIR="${CACHE_DIR:-${DATA_DIR}/cache}"
 LOCK_DIR="${LOCK_DIR:-${DATA_DIR}/lock}"
@@ -272,7 +282,7 @@ if [ "${ARCH}" = "riscv64" ]; then
         --mirror-binary http://ftp.ports.debian.org/debian-ports/ \
         --keyring-packages "debian-archive-keyring debian-ports-archive-keyring" \
         --security false \
-        --debootstrap-options --keyring=/usr/share/keyrings/debian-ports-archive-keyring.gpg
+        --debootstrap-options --keyring="${FILES_DIR}/keyrings/debian-ports-archive.gpg"
 else
     do_lb_config
 fi
@@ -303,37 +313,37 @@ fi
 rm -rf "${LB_DIR}/cache"
 ln -sf "${LB_CACHE_DIR}" "${LB_DIR}/cache"
 
-for i in "${BASE_DIR}/hooks"/*.hook.*.in; do
-    basefn="$(basename "$i" .in)"
-    rm -f "${LB_DIR}/config/hooks/normal/${basefn}"
-    render <"${i}" >"${LB_DIR}/config/hooks/normal/${basefn}"
-done
+render_files "${LB_DIR}/config/hooks/normal" "${BASE_DIR}/hooks"/*.hook.*
 
 HOOK_FILES_DIR="${LB_DIR}/config/includes.chroot_after_packages/hook-files"
-mkdir -p "${HOOK_FILES_DIR}"
-for i in "${BASE_DIR}/files/hooks"/*; do
-    basefn="$(basename "$i")"
-    render <"${i}" >"${HOOK_FILES_DIR}/${basefn}"
-done
-for i in "${BASE_DIR}/manpages"/*.md; do
+render_files "${HOOK_FILES_DIR}" "${FILES_DIR}/hooks"/*
+for i in "${FILES_DIR}/manpages"/*.md; do
     basefn="$(basename "$i" .md)"
     render <"${i}" | pandoc -s -t man -o "${HOOK_FILES_DIR}/${basefn}.1"
 done
 
-mkdir -p "${LB_DIR}/config/bootloaders/syslinux_common"
-render <"${BASE_DIR}/syslinux/splash.svg" | rsvg-convert --format png --width 640 --height 480 >"${LB_DIR}/config/bootloaders/syslinux_common/splash.png"
-cp "${BASE_DIR}/syslinux/isolinux.cfg" "${LB_DIR}/config/bootloaders/syslinux_common/"
-mkdir -p "${LB_DIR}/config/bootloaders/grub-pc"
-cp "${BASE_DIR}/grub"/*.cfg "${LB_DIR}/config/bootloaders/grub-pc/"
-render <"${BASE_DIR}/grub/splash.svg" | rsvg-convert --format png --width 1920 --height 1080 >"${LB_DIR}/config/bootloaders/grub-pc/splash.png"
-mkdir -p "${LB_DIR}/config/bootloaders/grub-pc/live-theme"
-cp "${BASE_DIR}/grub/theme.txt" "${LB_DIR}/config/bootloaders/grub-pc/live-theme/"
+render_files "${LB_DIR}/config/bootloaders/syslinux_common" "${FILES_DIR}/syslinux"/*.cfg
+render <"${FILES_DIR}/syslinux/splash.svg" | rsvg-convert --format png --width 640 --height 480 >"${LB_DIR}/config/bootloaders/syslinux_common/splash.png"
+render_files "${LB_DIR}/config/bootloaders/grub-pc" "${FILES_DIR}/grub"/*.cfg
+render <"${FILES_DIR}/grub/splash.svg" | rsvg-convert --format png --width 1920 --height 1080 >"${LB_DIR}/config/bootloaders/grub-pc/splash.png"
+render_files "${LB_DIR}/config/bootloaders/grub-pc/live-theme" "${FILES_DIR}/grub/theme.txt"
+render_files "${LB_DIR}/config/package-lists" "${BASE_DIR}/lists"/*.list.chroot
 
-cp "${BASE_DIR}/lists"/*.list.chroot "${LB_DIR}/config/package-lists/"
-
-if [ -e "${BASE_DIR}/squashfs.sort" ]; then
+if [ -z "${SQUASHFS_SORT_FILE}" ]; then
+    for f in \
+        "${FILES_DIR}/squashfs.${VERSION}.${ARCH}.sort" \
+        "${FILES_DIR}/squashfs.${ARCH}.sort" \
+        "${FILES_DIR}/squashfs.sort"
+    do
+        if [ -e "${f}" ]; then
+            SQUASHFS_SORT_FILE="${f}"
+            break
+        fi
+    done
+fi
+if [ -n "${SQUASHFS_SORT_FILE}" ]; then
     mkdir -p "${LB_DIR}/config/rootfs"
-    cp "${BASE_DIR}/squashfs.sort" "${LB_DIR}/config/rootfs/squashfs.sort"
+    cp "${SQUASHFS_SORT_FILE}" "${LB_DIR}/config/rootfs/squashfs.sort"
 fi
 
 # The in-squashfs initrds are unused; exclude them
@@ -359,6 +369,26 @@ EOM
 cat <<"EOM" >config/preseed/firmware-nonfree.cfg.chroot
 firmware-ipw2x00 firmware-ipw2x00/license/accepted boolean true
 EOM
+
+if [ "${ARCH}" = "riscv64" ]; then
+    mkdir -p "${LB_DIR}/config/archives"
+    cp "${FILES_DIR}/keyrings/debian-ports-archive.gpg" "${LB_DIR}/config/archives/ports.key.chroot"
+    cat >"${LB_DIR}/config/archives/ports.list.chroot" <<"EOM"
+deb http://ftp.ports.debian.org/debian-ports/ unreleased main contrib non-free
+deb-src http://ftp.ports.debian.org/debian-ports/ unreleased main contrib non-free
+EOM
+else
+    mkdir -p "${LB_DIR}/config/archives"
+    cat >"${LB_DIR}/config/archives/unstable.list.chroot" <<"EOM"
+deb http://deb.debian.org/debian/ unstable main contrib non-free
+deb-src http://deb.debian.org/debian/ unstable main contrib non-free
+EOM
+    cat >"${LB_DIR}/config/archives/unstable.pref.chroot" <<"EOM"
+Package: *
+Pin: release a=unstable
+Pin-Priority: 400
+EOM
+fi
 
 if [ "${LINT}" = "true" ]; then
     grep -l -E '^#!/(usr/)?bin/(env )?(ba)?sh' "${LB_DIR}/config/hooks/normal"/*-finnix-*.hook.chroot | xargs -r shellcheck
@@ -388,6 +418,9 @@ cp -a "${LB_DIR}"/*.packages.* "${BUILD_INFO_DIR}/${build_id}/"
 echo "${build_size}" >"${BUILD_INFO_DIR}/${build_id}/${ISO_FILENAME}.size"
 if [ "${SAVE_ISO}" = "true" ]; then
     cp -a "${LB_DIR}/${ISO_FILENAME}" "${BUILD_INFO_DIR}/${build_id}/${ISO_FILENAME}"
+    if [ "${SOURCE_ISO}" = "true" ]; then
+        cp -a "${LB_DIR}/${PRODUCT_ID}-source.iso" "${BUILD_INFO_DIR}/${build_id}/${PRODUCT_ID}-source.iso"
+    fi
 fi
 
 ls -lsa "${LB_DIR}/${ISO_FILENAME}"
