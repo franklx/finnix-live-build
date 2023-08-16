@@ -1,25 +1,44 @@
 name: ci
 on: [push, pull_request]
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: true
+    - name: Dependency packages
+      run: |
+        sudo apt update
+        sudo apt -y install $(tools/get-dependencies --only required)
+        for pkg in $(tools/get-dependencies --only optional); do
+          sudo apt -y install "${pkg}" || true
+        done
+    - name: Lint codebase
+      run: env LINT=true ./finnix-live-build
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
       with:
         submodules: true
     - name: Cache live-build
-      uses: actions/cache@v2
+      uses: actions/cache@v3
       with:
         path: build/cache
         key: finnix-live-build-1
     - name: Dependency packages
       run: |
         sudo apt update
-        sudo apt -y install $(cat build-dependencies.txt)
-    - name: Lint codebase
-      run: env LINT=true ./finnix-live-build
+        sudo apt -y install $(tools/get-dependencies --only required)
+        for pkg in $(tools/get-dependencies --only optional); do
+          sudo apt -y install "${pkg}" || true
+        done
     - name: Build image
-      run: sudo env BUILD_TAGS="github ci" ./finnix-live-build
+      run: |
+        sudo chown -R root:root .
+        sudo env BUILD_TAGS="github ci" ./finnix-live-build
     - name: Post-build cleanup
       run: |
         sudo rm -rf build/cache/lb/bootstrap build/cache/lb/contents.chroot build/cache/lb/indices.bootstrap
+        sudo chown -R "$(id -un):$(id -gn)" .

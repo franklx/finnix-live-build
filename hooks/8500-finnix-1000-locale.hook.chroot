@@ -5,13 +5,13 @@
 # SPDX-FileCopyrightText: Copyright (C) 2020-2022 Ryan Finnie
 # SPDX-License-Identifier: MPL-2.0
 
-# Must be run after 0040-create-locales-files.hook.chroot
+# Upstream depends: 1020-create-locales-files.hook.chroot
 
 set -e
 
 echo 'LANG=en_US.UTF-8' >/etc/default/locale
 sed -i -e 's/^# en_US.UTF-8 /en_US.UTF-8 /g' /etc/locale.gen
-grep -q '^en_US.UTF-8 ' /etc/locale.gen  # Verification
+grep -q '^en_US.UTF-8 ' /etc/locale.gen # Verification
 locale-gen
 
 install -D -m 0755 /hook-files/locale-config /usr/sbin/locale-config

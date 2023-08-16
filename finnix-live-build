@@ -11,7 +11,7 @@ VERSION="frk-$(date +%Y%m%d)"
 PRODUCT="${PRODUCT:-Finnix}"
 PRODUCT_ID="${PRODUCT_ID:-finnix}"
 VERSION="${VERSION:-dev}"
-CODENAME="${CODENAME:-Wisconsin Dells}"
+CODENAME="${CODENAME:-Wisconsin Rapids}"
 ARCH="${ARCH:-$(dpkg --print-architecture)}"
 SOURCE_ISO="${SOURCE_ISO:-false}"
 CACHE_FROZEN="${CACHE_FROZEN:-false}"
@@ -19,6 +19,7 @@ SAVE_ISO="${SAVE_ISO:-false}"
 LINT="${LINT:-false}"
 BUILD_TAGS="${BUILD_TAGS:-}"
 PYTHON="${PYTHON:-python3}"
+UNSTABLE_PIN="${UNSTABLE_PIN:-true}"
 
 lock() {
     _file=$1
@@ -51,17 +52,26 @@ render() {
         "GIT_DESC=${GIT_DESC}" \
         "LIVE_BUILD_GIT_DESC=${LIVE_BUILD_GIT_DESC}" \
         "BUILD_TAGS=${BUILD_TAGS}" \
-    "${BASE_DIR}/tools/jinja2-render"
+        "${BASE_DIR}/tools/jinja2-render"
 }
 
 render_files() {
-    destdir="$1"; shift
+    destdir="$1"
+    shift
     mkdir -p "${destdir}"
     for i in "$@"; do
         basefn="$(basename "$i")"
         rm -f "${destdir}/${basefn}"
         render <"${i}" >"${destdir}/${basefn}"
     done
+}
+
+lint_shfmt() {
+    fn="$1"
+    shift
+    bfn="$(basename "$fn")"
+    shfmt -ln=posix -i 4 "${fn}" >"$LINT_DIR/${bfn}"
+    diff -u "${fn}" "$LINT_DIR/${bfn}"
 }
 
 # PACKAGES USED:
@@ -74,6 +84,7 @@ render_files() {
 # Required: pandoc: Manpage builds
 # Optional: shellcheck (shellcheck): Lint, required for LINT=true
 # Optional: flake8 (${PYTHON} -mflake8): Lint, required for LINT=true
+# Optional: shfmt (shfmt): Lint, optional for LINT=true
 # Optional: git (git): Build IDs
 # Optional: file (file): Post-build file info
 
@@ -89,9 +100,11 @@ if [ -n "${missing_commands}" ]; then
     echo "ERROR: Missing required commands:${missing_commands}" >&2
     exit 1
 fi
+has_shfmt=true
+command -v shfmt >/dev/null 2>/dev/null || has_shfmt=false
 if command -v dpkg >/dev/null 2>/dev/null; then
-    if ! dpkg --compare-versions "$(debootstrap --version | cut -d' ' -f2)" ge 1.0.102; then
-        echo "ERROR: debootstrap 1.0.102 or later is required"
+    if ! dpkg --compare-versions "$(debootstrap --version | cut -d' ' -f2)" ge 1.0.107; then
+        echo "ERROR: debootstrap 1.0.107 or later is required"
         exit 1
     fi
 fi
@@ -150,9 +163,13 @@ LB_DIR="${LB_DIR:-${DATA_DIR}/lb}"
 LB_CACHE_DIR="${LB_CACHE_DIR:-${CACHE_DIR}/lb}"
 LIVE_BUILD="${LIVE_BUILD:-${BASE_DIR}/live-build}"
 
+is_dirty=false
 GIT_DESC="$(git -C "${BASE_DIR}" describe --always --dirty 2>/dev/null || true)"
 if [ -n "${GIT_DESC}" ]; then
-    git -C "${BASE_DIR}" diff --quiet 2>/dev/null || BUILD_TAGS="${BUILD_TAGS} dirty"
+    if ! git -C "${BASE_DIR}" diff --quiet 2>/dev/null; then
+        is_dirty=true
+        BUILD_TAGS="${BUILD_TAGS} dirty"
+    fi
 fi
 LIVE_BUILD_GIT_DESC=""
 
@@ -179,6 +196,9 @@ fi
 if [ -n "${SCHROOT_SESSION_ID}" ]; then
     BUILD_TAGS="${BUILD_TAGS} schroot"
 fi
+if [ -e "/.dockerenv" ]; then
+    BUILD_TAGS="${BUILD_TAGS} docker"
+fi
 # (SC2154) Lowercase variable is conditionally set by systemd-nspawn,
 # nothing we can do
 # shellcheck disable=SC2154
@@ -191,13 +211,13 @@ if [ -e /etc/os-release ]; then
         read -r "${i?}" || true
     done <<EOM
 $(
-    # (SC1091) Do not attempt to read os-release when linting
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    echo "$ID"
-    echo "$VERSION_CODENAME"
-    echo "$VERSION_ID"
-)
+        # (SC1091) Do not attempt to read os-release when linting
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        echo "$ID"
+        echo "$VERSION_CODENAME"
+        echo "$VERSION_ID"
+    )
 EOM
     if [ -n "${BUILD_OS_VERSION_CODENAME}" ]; then
         build_os_ver="${BUILD_OS_VERSION_CODENAME}"
@@ -227,9 +247,24 @@ BUILD_TAGS="$(for i in ${BUILD_TAGS}; do echo "${i}"; done | sort | uniq | xargs
 
 if [ "${LINT}" = "true" ]; then
     shellcheck "${BASE_DIR}/finnix-live-build"
-    for script_dir in "${BASE_DIR}/tools" .rrpcid/jobs/*; do
-        grep -l -E '^#!/(usr/)?bin/(env )?(ba)?sh' "${script_dir}"/* | xargs -r shellcheck
+    [ "${has_shfmt}" = "true" ] && lint_shfmt "${BASE_DIR}/finnix-live-build"
+    for script_dir in "${BASE_DIR}/tools" "${BASE_DIR}/.rrpcid/jobs"/*; do
+        # Interpet output as words
+        # shellcheck disable=SC2013
+        for fn in $(grep -l -E '^#!/(usr/)?bin/(env )?(ba)?sh' "${script_dir}"/*); do
+            [ -e "${fn}" ] || continue
+            shellcheck "${fn}"
+            [ "${has_shfmt}" = "true" ] && lint_shfmt "${fn}"
+        done
         grep -l -E '^#!/(usr/)?bin/(env )?python3' "${script_dir}"/* | xargs -r "${PYTHON}" -mflake8 --config=/dev/null --max-line-length=120
+    done
+
+    for fn in "${BASE_DIR}"/*.md "${BASE_DIR}/.rrpcid"/*.md "${BASE_DIR}/files/manpages"/*.md; do
+        md_temp_in_fn="in_$(basename "${fn}")"
+        md_temp_out_fn="out_$(basename "${fn}")"
+        render <"${fn}" >"${LINT_DIR}/${md_temp_in_fn}"
+        pandoc -s -t gfm+smart --columns=80 -i "${LINT_DIR}/${md_temp_in_fn}" -o "${LINT_DIR}/${md_temp_out_fn}"
+        diff -u "${LINT_DIR}/${md_temp_in_fn}" "${LINT_DIR}/${md_temp_out_fn}"
     done
 fi
 
@@ -248,9 +283,9 @@ do_lb_config() {
         --apt-http-proxy "${APT_HTTP_PROXY}" \
         --apt-indices false \
         --apt-recommends false \
-        --apt-source-archives false \
+        --apt-source-archives "${SOURCE_ISO}" \
         --architectures "${ARCH}" \
-        --archive-areas "main contrib non-free" \
+        --archive-areas "main contrib non-free non-free-firmware" \
         --binary-images "${BINARY_IMAGES}" \
         --bootappend-live 'boot=live quiet sshd passwd=root:finnix passwd=finnix:linux' \
         --bootloaders "${BOOTLOADERS}" \
@@ -319,7 +354,12 @@ HOOK_FILES_DIR="${LB_DIR}/config/includes.chroot_after_packages/hook-files"
 render_files "${HOOK_FILES_DIR}" "${FILES_DIR}/hooks"/*
 for i in "${FILES_DIR}/manpages"/*.md; do
     basefn="$(basename "$i" .md)"
-    render <"${i}" | pandoc -s -t man -o "${HOOK_FILES_DIR}/${basefn}.1"
+    (
+        echo "---"
+        render <"${FILES_DIR}/manpages/${basefn}.metadata.yaml"
+        echo "---"
+        render <"${i}"
+    ) | pandoc -s -f markdown_github-smart+yaml_metadata_block -t man -o "${HOOK_FILES_DIR}/${basefn}.1"
 done
 
 render_files "${LB_DIR}/config/bootloaders/syslinux_common" "${FILES_DIR}/syslinux"/*.cfg
@@ -333,8 +373,7 @@ if [ -z "${SQUASHFS_SORT_FILE}" ]; then
     for f in \
         "${FILES_DIR}/squashfs.${VERSION}.${ARCH}.sort" \
         "${FILES_DIR}/squashfs.${ARCH}.sort" \
-        "${FILES_DIR}/squashfs.sort"
-    do
+        "${FILES_DIR}/squashfs.sort"; do
         if [ -e "${f}" ]; then
             SQUASHFS_SORT_FILE="${f}"
             break
@@ -374,25 +413,43 @@ if [ "${ARCH}" = "riscv64" ]; then
     mkdir -p "${LB_DIR}/config/archives"
     cp "${FILES_DIR}/keyrings/debian-ports-archive.gpg" "${LB_DIR}/config/archives/ports.key.chroot"
     cat >"${LB_DIR}/config/archives/ports.list.chroot" <<"EOM"
-deb http://ftp.ports.debian.org/debian-ports/ unreleased main contrib non-free
-deb-src http://ftp.ports.debian.org/debian-ports/ unreleased main contrib non-free
+deb http://ftp.ports.debian.org/debian-ports/ unreleased main contrib non-free non-free-firmware
+deb-src http://ftp.ports.debian.org/debian-ports/ unreleased main contrib non-free non-free-firmware
 EOM
-else
+elif [ "${UNSTABLE_PIN}" = "true" ]; then
     mkdir -p "${LB_DIR}/config/archives"
     cat >"${LB_DIR}/config/archives/unstable.list.chroot" <<"EOM"
-deb http://deb.debian.org/debian/ unstable main contrib non-free
-deb-src http://deb.debian.org/debian/ unstable main contrib non-free
+deb http://deb.debian.org/debian/ unstable main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian/ unstable main contrib non-free non-free-firmware
 EOM
+    cp "${LB_DIR}/config/archives/unstable.list.chroot" "${LB_DIR}/config/archives/unstable.list.binary"
     cat >"${LB_DIR}/config/archives/unstable.pref.chroot" <<"EOM"
 Package: *
 Pin: release a=unstable
 Pin-Priority: 400
 EOM
+    cp "${LB_DIR}/config/archives/unstable.pref.chroot" "${LB_DIR}/config/archives/unstable.pref.binary"
+fi
+cat >"${LB_DIR}/config/archives/80${PRODUCT_ID}.conf.binary" <<"EOM"
+Acquire::PDiffs "false";
+Acquire::Languages { "none"; };
+EOM
+if [ "${SOURCE_ISO}" = "false" ]; then
+    sed -i "s/^deb-src/#deb-src/g" "${LB_DIR}/config/archives"/*.list.*
 fi
 
 if [ "${LINT}" = "true" ]; then
-    grep -l -E '^#!/(usr/)?bin/(env )?(ba)?sh' "${LB_DIR}/config/hooks/normal"/*-finnix-*.hook.chroot | xargs -r shellcheck
-    grep -l -E '^#!/(usr/)?bin/(env )?(ba)?sh' "${LB_DIR}/config/includes.chroot_after_packages/hook-files"/* | xargs -r shellcheck
+    # Interpet output as words
+    # shellcheck disable=SC2013
+    for fn in $(
+        grep -l -E '^#!/(usr/)?bin/(env )?(ba)?sh' \
+            "${LB_DIR}/config/hooks/normal"/*-finnix-*.hook.chroot \
+            "${LB_DIR}/config/includes.chroot_after_packages/hook-files"/*
+    ); do
+        [ -e "${fn}" ] || continue
+        shellcheck "${fn}"
+        [ "${has_shfmt}" = "true" ] && lint_shfmt "${fn}"
+    done
     grep -l -E '^#!/(usr/)?bin/(env )?python3' "${LB_DIR}/config/hooks/normal"/*-finnix-*.hook.chroot | xargs -r "${PYTHON}" -mflake8 --config=/dev/null --max-line-length=120
     grep -l -E '^#!/(usr/)?bin/(env )?python3' "${LB_DIR}/config/includes.chroot_after_packages/hook-files"/* | xargs -r "${PYTHON}" -mflake8 --config=/dev/null --max-line-length=120
 fi
@@ -415,6 +472,10 @@ cp -a "${LB_DIR}"/*.contents "${BUILD_INFO_DIR}/${build_id}/"
 cp -a "${LB_DIR}"/*.files "${BUILD_INFO_DIR}/${build_id}/"
 cp -a "${LB_DIR}"/*.packages "${BUILD_INFO_DIR}/${build_id}/"
 cp -a "${LB_DIR}"/*.packages.* "${BUILD_INFO_DIR}/${build_id}/"
+if [ "${is_dirty}" = "true" ]; then
+    git -C "${BASE_DIR}" status >"${BUILD_INFO_DIR}/${build_id}/dirty.patch"
+    git -C "${BASE_DIR}" diff >>"${BUILD_INFO_DIR}/${build_id}/dirty.patch"
+fi
 echo "${build_size}" >"${BUILD_INFO_DIR}/${build_id}/${ISO_FILENAME}.size"
 if [ "${SAVE_ISO}" = "true" ]; then
     cp -a "${LB_DIR}/${ISO_FILENAME}" "${BUILD_INFO_DIR}/${build_id}/${ISO_FILENAME}"

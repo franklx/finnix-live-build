@@ -3,23 +3,33 @@
 set -e
 set -x
 
-# Dependency packages
-sudo apt update
-# (SC2046) Word splitting is desired here
-# shellcheck disable=SC2046
-sudo apt -y install $(cat build-dependencies.txt)
-
-# Lint codebase
-env LINT=true ARCH="${ARCH}" BUILD_TAGS="rrpcid ci ${BUILD_TAGS}" ./finnix-live-build
+if [ -e /etc/dnf/dnf.conf ]; then
+    # (SC2046) Word splitting is desired here
+    # shellcheck disable=SC2046
+    sudo dnf -y install $(tools/get-dependencies --only required)
+    for pkg in $(tools/get-dependencies --only optional); do
+        sudo dnf -y install "${pkg}" || true
+    done
+else
+    sudo apt update
+    # (SC2046) Word splitting is desired here
+    # shellcheck disable=SC2046
+    sudo apt -y install $(tools/get-dependencies --only required)
+    for pkg in $(tools/get-dependencies --only optional); do
+        sudo apt -y install "${pkg}" || true
+    done
+fi
 
 # Build image
+sudo chown -R root:root .
 sudo env ARCH="${ARCH}" BUILD_TAGS="rrpcid ci ${BUILD_TAGS}" ./finnix-live-build
+sudo rm -rf build/cache/lb/bootstrap build/cache/lb/contents.chroot build/cache/lb/indices.bootstrap
+sudo chown -R "$(id -un):$(id -gn)" .
 
 # Save artifacts
 mkdir -p .rrpcid/artifacts
-sudo mv \
+mv \
     build/lb/finnix-* \
     build/lb/chroot.files \
     build/lb/chroot.packages.* \
     .rrpcid/artifacts/
-sudo chown -R "$(id -un):$(id -gn)" .rrpcid/artifacts

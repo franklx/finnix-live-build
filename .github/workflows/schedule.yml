@@ -7,19 +7,26 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
       with:
         submodules: true
     - name: Dependency packages
       run: |
         sudo apt update
-        sudo apt -y install $(cat build-dependencies.txt)
-    - name: Lint codebase
-      run: env LINT=true ./finnix-live-build
+        sudo apt -y install $(tools/get-dependencies --only required)
+        for pkg in $(tools/get-dependencies --only optional); do
+          sudo apt -y install "${pkg}" || true
+        done
     - name: Build image
-      run: sudo env BUILD_TAGS="github schedule" ./finnix-live-build
+      run: |
+        sudo chown -R root:root .
+        sudo env BUILD_TAGS="github schedule" ./finnix-live-build
+    - name: Post-build cleanup
+      run: |
+        sudo rm -rf build/cache/lb/bootstrap build/cache/lb/contents.chroot build/cache/lb/indices.bootstrap
+        sudo chown -R "$(id -un):$(id -gn)" .
     - name: Upload artifacts
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: finnix-live-build.${{ github.workflow }}.${{ github.job }}.${{ github.run_number }}.${{ github.run_id }}
         path: |

@@ -5,29 +5,11 @@
 # SPDX-FileCopyrightText: Copyright (C) 2021-2022 Ryan Finnie
 # SPDX-License-Identifier: MPL-2.0
 
-# TODO: Make handlers configurable, better coding, etc
-
 import argparse
+import json
 import os
+import pathlib
 import sys
-
-
-HANDLERS = [
-    {"commands": ["ftp"], "packages": ["ftp"], "similar_commands": ["lftp"]},
-    {"commands": ["ftp-ssl"], "packages": ["ftp-ssl"], "similar_commands": ["lftp"]},
-    {"commands": ["lynx"], "packages": ["lynx"], "similar_commands": ["elinks", "w3m"]},
-    {
-        "commands": ["links2"],
-        "packages": ["links2"],
-        "similar_commands": ["elinks", "w3m"],
-    },
-    {"commands": ["strings"], "packages": ["binutils"]},
-    {
-        "commands": ["vim"],
-        "packages": ["vim", "neovim"],
-        "similar_commands": ["vim.tiny"],
-    },
-]
 
 
 def eprint(*args, **kwargs):
@@ -35,44 +17,52 @@ def eprint(*args, **kwargs):
     return print(*args, **kwargs)
 
 
-if __name__ == "__main__":
-    if os.path.exists("/usr/lib/command-not-found.distrib"):
-        os.execv("/usr/lib/command-not-found.distrib", sys.argv)
+def do_handler(handler):
+    if handler.get("packages"):
+        if os.getuid() == 0:
+            apt_command = "apt"
+        else:
+            apt_command = "sudo apt"
+        eprint()
+        eprint("It can be installed with:")
+        eprint("    {} update".format(apt_command))
+        for i, package in enumerate(handler["packages"], 1):
+            eprint(
+                "    {} install {}{}".format(
+                    apt_command,
+                    package,
+                    ("  # or" if i < len(handler["packages"]) else ""),
+                )
+            )
+    if handler.get("similar_commands"):
+        eprint()
+        eprint("Other installed programs provide similar functionality:")
+        for similar_command in handler["similar_commands"]:
+            eprint("    {}".format(similar_command))
+        eprint()
+    if handler.get("note"):
+        eprint()
+        eprint(handler["note"])
 
+
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command")
     args = parser.parse_args(args=sys.argv[1:])
 
     eprint("{}: command not found".format(args.command))
 
-    for handler in HANDLERS:
-        if args.command not in handler["commands"]:
-            continue
-        if handler.get("packages"):
-            if os.getuid() == 0:
-                apt_command = "apt"
-            else:
-                apt_command = "sudo apt"
-            eprint()
-            eprint("It can be installed with:")
-            eprint("    {} update".format(apt_command))
-            for i, package in enumerate(handler["packages"], 1):
-                eprint(
-                    "    {} install {}{}".format(
-                        apt_command,
-                        package,
-                        ("  # or" if i < len(handler["packages"]) else ""),
-                    )
-                )
-        if handler.get("similar_commands"):
-            eprint()
-            eprint("Other installed programs provide similar functionality:")
-            for similar_command in handler["similar_commands"]:
-                eprint("    {}".format(similar_command))
-            eprint()
-        if handler.get("note"):
-            eprint()
-            eprint(handler["note"])
-        break
+    for fn in pathlib.Path("/etc/simple-cnf/handlers.d").glob("*.json"):
+        with fn.open() as f:
+            for handler in json.load(f):
+                if args.command not in handler["commands"]:
+                    continue
+                do_handler(handler)
+                return 127
+    return 127
 
-    sys.exit(127)
+
+if __name__ == "__main__":
+    if os.path.exists("/usr/lib/command-not-found.distrib"):
+        os.execv("/usr/lib/command-not-found.distrib", sys.argv)
+    sys.exit(main())
